@@ -53,8 +53,11 @@ instance showSequence :: Show a => Show (Sequence a) where
 instance functorSequence :: Functor Sequence where
   map f x = Sequence \ n -> f <$> x !! n
 
+-- TODO: Find a better implementation
 instance applySequence :: Apply Sequence where
-  apply f x = Sequence \ n -> f !! n <*> x !! n
+  apply f x = case uncons f of
+    Just r -> (r.head <$> x) <> (r.tail <*> x)
+    _ -> nil
 
 instance applicativeSequence :: Applicative Sequence where
   pure a = Sequence \ i -> if i == 0 then Just a else Nothing
@@ -209,11 +212,11 @@ tail xs = case head xs of
   _ -> Just (Sequence \ n -> xs !! (n + 1))
 
 tails :: forall a. Sequence a -> Sequence (Sequence a)
-tails xs = go 0 nil where
+tails xs = Sequence f where
   l = length xs
-  go n acc
-    | n >= l = acc
-    | otherwise = go (n + 1) (drop n xs : acc)
+  f i
+    | i <= l = Just (drop i xs)
+    | otherwise = Nothing
 
 uncons :: forall a. Sequence a -> Maybe {head :: a, tail :: Sequence a}
 uncons xs = {head: _, tail: _} <$> head xs <*> tail xs
@@ -272,22 +275,55 @@ reverse xs = Sequence \ i -> xs !! (length xs - i - 1)
 
 newtype Step = Step Int
 
+-- | [n,i..m]
 rangeBy :: Step -> Int -> Int -> Sequence Int
 rangeBy (Step n) start end = Sequence f where
   f i
     | i <= end/n - start = Just (i*n + start)
     | otherwise = Nothing
 
+-- | [n..m]
 range :: Int -> Int -> Sequence Int
 range = rangeBy (Step 1)
 
 infix 8 range as ..
 
+-- | [n,i..]
 rayBy :: Step -> Int -> Sequence Int
 rayBy (Step n) start = Sequence \ i -> Just (i*n + start)
 
+-- | [n..]
 ray :: Int -> Sequence Int
 ray = rayBy (Step 1)
+
+findIndexWithIndex :: forall a. (Int -> a -> Boolean) -> Sequence a -> Maybe Int
+findIndexWithIndex f xs = go 0 where
+  go n = case xs !! n of
+    Just a -> if f n a then Just n else go (n + 1)
+    _ -> Nothing
+
+findIndex :: forall a. (a -> Boolean) -> Sequence a -> Maybe Int
+findIndex = findIndexWithIndex <<< const
+
+findLastIndex :: forall a. (a -> Boolean) -> Sequence a -> Maybe Int
+findLastIndex f xs = go (length xs - 1) where
+  go n = case xs !! n of
+    Just a -> if f a then Just n else go (n - 1)
+    _ -> Nothing
+
+filter :: forall a. (a -> Boolean) -> Sequence a -> Sequence a
+filter f xs = Sequence (go (-1)) where
+  go prevIdx = g (prevIdx + 1) 
+  g acc 0
+    | Just a <- xs !! acc
+    , f a = Just a
+    | Just _ <- xs !! acc = g (acc + 1) 0
+    | otherwise = Nothing
+  g acc n
+    | Just a <- xs !! acc
+    , f a = g (acc + 1) (n - 1)
+    | Just _ <- xs !! acc = g (acc + 1) n
+    | otherwise = Nothing
 
 unsafeIndex :: forall a. Partial => Sequence a -> Int -> a
 unsafeIndex xs i = case xs !! i of
